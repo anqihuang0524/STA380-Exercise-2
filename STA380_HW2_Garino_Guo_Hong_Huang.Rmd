@@ -1,0 +1,238 @@
+---
+title: "STAT380_Exer2"
+author: "Anthony Garino, Anqi Huang, Olivia Hong, Yun Guo"
+date: "Summer 2016"
+output: pdf_document
+---
+
+# Flights at ABIA
+
+With this very interesting dataset, let's first run some exploratory analysis to figure out which time period witnesses the most air traffic into/out of Austin.
+
+```{r, include=TRUE, echo=FALSE}
+c<-read.csv('ABIA.csv')
+c<-c[,c(2,4,5,7,9,15,16,17,18,25,26,27,28,29)]
+c[,'DIR']=NA
+c[,'DIR'][c[,'Origin']=='AUS']='DEP'
+c[,'DIR'][c[,'Dest']=='AUS']='ARR'
+c[,'ARR']=ceiling(c[,'ArrTime']/100)
+c[,'DEP']=ceiling(c[,'DepTime']/100)
+c[,'Time']=ifelse(test = c[,'DIR']=='DEP', yes = c[,'DEP'], no = c[,'ARR'])
+
+pv<-as.data.frame.table(xtabs('~ Month + Time + DIR', data = c))
+
+# Choropleth of Arrival/Departure Frequency
+library(ggplot2)
+plt1<-ggplot(data = pv, mapping = aes(Month, Time, fill = Freq)) + facet_grid(~ DIR) + geom_tile() + scale_fill_gradient(trans='sqrt', low = 'white', high = 'dark green')
+plt1
+```
+
+From this heat map, we can clearly see that 7-9 am is the busiest **departure** window throughout the year. However, whether the busiest hour is 7-8 am or 8-9 am varies by month: winter months (if there are any) tend to witness highest volume within the 8-9 am window, whereas relatively warm months (May-Aug.) the highest volume kicks in an hour earlier (7-8 am). This is actually a very interesting insight, one that speaks to the humaneness of airport schedulers: on winter months they give us an extra hour of shut-eye before we are reluctantly whisked to the airport.
+
+Next, as concerned citizens and taxpayers we naturally wanted to understand what it is that kept on delaying our innocuous flights. Is it security concerns? That universally applicable cop-out (weather)? Or something more wicked (unknown)?
+
+According to the FAA's website, There are five types of delays:
+Late Arrival Delay ("Late" hereinafter): Arrival delay at an airport due to the late arrival of the same aircraft at a previous airport;
+Security Delay ("Security"): Evacuation of a terminal or concourse, re-boarding of aircraft because of security breach;
+NAS Delay ("NAS"): Airport operations, heavy traffic volume, air traffic control reasons;
+Weather Delay ("Weather"): Self-evident;
+Carrier Delay ("Carrier"): Airline logistics reasons, like aircraft cleaning, aircraft damage, bird strike / crew strike...
+
+Next, we seek to plot the incidence of each category by month.
+
+
+```{r, include=TRUE, echo=FALSE}
+c2<-subset(c, c[,'CarrierDelay']!='NA')
+library(dplyr)
+pv2<-group_by(c2, Month, DIR)
+pv2<-summarise(pv2, Carrier=sum(CarrierDelay), Weather=sum(WeatherDelay), NAS=sum(NASDelay), Security=sum(SecurityDelay), Late=sum(LateAircraftDelay))
+library(reshape2)
+pv2<-reshape2::melt(pv2, id.vars=c('Month', 'DIR'))
+plt2<-ggplot(data = pv2, mapping = aes(Month, variable, fill = value)) + facet_grid(~ DIR) + geom_tile() + scale_fill_gradient(trans='sqrt', low = 'white', high = 'dark red') + coord_cartesian(xlim = c(1,12)) + scale_x_continuous(breaks = seq(1, 12, by = 1))
+plt2
+```
+
+According to the plot, most of the delays are attributable to late arrival of inbound aircrafts. But there are multiple reasons for this. On closer scrutiny, it appears that this category correlates heavily with the "Carrier" delay group (whenever 'Carrier' delays are high, late arrives are more common). This could mean that airlines are more sloppy in certain months and are more prone to aircraft lateness. Note that these months include March and December, the colder months. This could mean that blizzards in northeast are affecting on time departures of flights bound for Austin. Finally, security is not the major reason for delays.
+
+\newpage
+
+#Author Attribution
+In this question, we first tried Naive Bayes.
+This wraps another function around readPlan to read plain  text documents in English.
+And we set the number of anthor as 50 because there are 50 authors totally.
+```{r, include=TRUE, echo=FALSE}
+library(tm)
+
+readerPlain = function(fname){
+  readPlain(elem=list(content=readLines(fname)), 
+            id=fname, language='en') }
+
+num_authors = 50
+```
+
+
+```{r, include=TRUE, echo=TRUE}
+author_dirs = Sys.glob('./data/ReutersC50/C50train/*')
+author_dirs = author_dirs[1:num_authors]
+file_list = NULL # This is for all files, including both train/test.
+labels = NULL
+for(author in author_dirs) {
+  author_name = substring(author, first=29)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list = append(file_list, files_to_add)
+  labels = append(labels, rep(author_name, length(files_to_add)))
+}
+test_dirs = Sys.glob('./data/ReutersC50/C50test/*')
+test_dirs = test_dirs[1:num_authors]
+test_labels = NULL
+for(author in test_dirs) {
+  author_name = substring(author, first=28)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list = append(file_list, files_to_add)
+  test_labels = append(test_labels, rep(author_name, length(files_to_add)))
+}
+
+```
+
+Here, we first creat a blank lists of 'file_list' and 'labels' to store all files including both the training and testing articles later. 
+
+Then read in all the file in 'C50train' and 'C50test'.
+Note: the reason that we read all the files, instead of only the training articles, at the very begining is that we will effeciently avoid any words that only show in the testing set.
+
+once you have documents in a vector, you 
+create a text mining 'corpus' with: 
+
+```{r, include=TRUE, echo=TRUE}
+all_docs = lapply(file_list, readerPlain) 
+names(all_docs) = file_list
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = file_list
+```
+
+Some pre-processing/tokenization steps.
+tm_map just maps some function to every document in the corpus
+
+```{r, include=TRUE, echo=TRUE}
+# Preprocessing
+my_corpus = tm_map(my_corpus, content_transformer(tolower)) # make everything lowercase
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers)) # remove numbers
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation)) # remove punctuation
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+```
+
+
+```{r, include=TRUE, echo=TRUE}
+DTM = DocumentTermMatrix(my_corpus)
+DTM = removeSparseTerms(DTM, 0.975)
+X=as.matrix(DTM)
+X_train = X[1:2500, ]
+X_test = X[2501:5000, ]
+num_rows = nrow(X_train)
+num_cols = ncol(X_train)
+```
+In this way, we will divide the matrix into training and testing set as we know that the first 2500 (50 *50) come from the training set and the later 2500 (50 * 50) come from testing set.
+
+Following, we calculate every author's multinomial probability vector with the smoothing factor.
+```{r, include=TRUE, echo=TRUE}
+smooth_count = 1/nrow(X_train)
+author_weights <- list()
+author_classes = NULL
+for (i in 0 : (num_authors-1)) {
+  author_train = X_train[(i*50 + 1): ((i+1)*50), ]
+  author_weight = colSums(author_train + smooth_count)
+  author_weight = author_weight/sum(author_weight)
+  author_weights[[(i+1)]] <- author_weight
+  author_classes = append(author_classes, labels[i*50+1])
+}
+```
+
+Then we evaluate each article in the test set and find the author with maximum log_probs, so it is the evaluate result of each article using the model.
+```{r, include=TRUE, echo=TRUE}
+evaluate =  function(test_instance){
+  log_probs <- vector()
+  for (i in 1 : num_authors) {
+    log_prob = sum(test_instance*log(author_weights[[i]]))
+    log_probs[i] <- log_prob
+  }
+  author_classes[which.max(log_probs)]
+}
+result = apply(X_test, 1, evaluate)
+
+```
+
+At last, we made a matrix to compare the predicting results from the model and the real answer.
+```{r, include=TRUE, echo=FALSE}
+accuracy = mean(result == test_labels)
+confusion_matrix = table(result, test_labels)
+```
+
+```{r, include=TRUE, echo=TRUE}
+print(accuracy)
+```
+So the accuracy of the Naive Bayes model is 60.24%. This is the average accuracy of all the 2500 articles (50 articles from each of the 50 authors).
+
+```{r, include=TRUE, echo=TRUE}
+print(confusion_matrix)
+```
+From the result from the confusion_matrix, we find that the articles from AlanCrosby are easily predicted as from JohnMastrini. AlexanderSmith's articles are predicted to be from JoeOrtiz. And DarrenSchuettler's work is more likely to be predicted as HeatherScoffield's. And the same situation happens to ScottHillis's articles as they are most predicted to be JaneMacartney. What is more, TanEeLyn's works are mostly equally predicted to from TanEeLyn and PeterHumphrey.
+
+We now use a slightly more complex model (RandomForest) to predict authorship. The code can be reviewed in source file. Below is the confusion matrix output for this model.
+
+```{r, include=TRUE, echo=FALSE}
+
+actual_author = rep(rep(1:50, each=50), 2)
+author = as.data.frame(X)
+colnames(author)=make.names(colnames(author))
+author$actual=as.factor(actual_author)
+
+# Split
+author_train =  author[1:2500,]
+author_test = author[2501:5000,]
+library(randomForest)
+rf=randomForest(actual~., data=author_train)
+p=predict(rf, newdata=author_test)
+library(caret)
+confusionMatrix(p,author_test$actual)
+```
+
+This Random Forest model gives us an improved accuracy of 62.04% (compared to Naive Bayes model's 60.24%). Although it yielded a better performance, we might stick with Naive Bayes in practice since it's 1) more computationally efficient and 2) more interpretable and intuitive.
+
+\newpage
+
+#Practice with association rule mining
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this problem we used data on grocery purchases to find some interesting association rules for these shopping baskets. First we tried the Apriori algorithm with the following parameters: support=.01, confidence=.55, maxlen=4, and lift>=2. Below are the items from these baskets. The ubiquitous terms appear to be whole milk, vegetables, yogurt, and fruit.
+
+```{r, include=FALSE}
+library(arules)
+library(arulesViz)
+```
+
+```{r, echo=FALSE}
+# read in data and convert class
+groceries = read.csv("groceries.txt", header=FALSE)
+groc.trans = read.transactions("groceries.txt", format="basket", sep=",", rm.duplicates=TRUE)
+# mining associations
+groc.rules = apriori(groc.trans, parameter=list(support=.01, confidence=.55, maxlen=4))
+inspect(subset(groc.rules,(subset=lift>=2)))
+```
+
+To find more interesting rules, we ran the algorithm again with support=.001, confidence=.55, maxlen=4, and lift>=10. This gave a list of 7 rules. By lowering the support, we were able to find items that appeared less often, and by raising the lift, were able to find more significant associations. We left confidence the same; changing it higher would reduce the number of rules too much, and changing it lower resulted in more similar, less-varied rules, like {baking powder,flour} => {sugar} and {baking powder,margarine} => {sugar}.
+
+```{r, echo=FALSE, out.width = '750px', dpi=200}
+# mining associations again
+groc.rules = apriori(groc.trans, parameter=list(support=.001, confidence=.55, maxlen=4))
+sub.rules <- subset(groc.rules,(subset=lift>=10))
+inspect(sub.rules)
+plot(sub.rules, method="graph", control=list(type="items"))
+```
+
+From the output, the item sets make a lot of sense. Some common sense relationships are purchasing liquor and wine leading to beer (90% of people who buy liquor and wine will also buy beer), purchasing popcorn and soda leading to salty snacks, and purchasing baking powder and flour leading to sugar (compared to a random person, people who buy baking powder and flour are 16 times as likely to buy sugar). The explanations are quite intuitive. Popcorn, soda, and salty snacks are complementary goods, while baking powder, flour, and sugar are highly related due to the organizational structure of supermarkets. There are also combo deals that might sell certain popular goods together, like ham and cheese for making sandwiches.
+
+
